@@ -171,4 +171,4 @@ dbt build  # run + test
 
 **Tariq** — Data Engineer specializing in lakehouse architectures on Databricks and Microsoft Fabric.
 
-[LinkedIn](https://linkedin.com/in/YOUR_LINKEDIN) · [GitHub](https://github.com/DataWithTariq)
+[LinkedIn](https://www.linkedin.com/in/tariq-ladidji-b08951311/) · [GitHub](https://github.com/DataWithTariq)

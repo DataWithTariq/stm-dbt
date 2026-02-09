@@ -1,0 +1,81 @@
+version: 2
+
+sources:
+  - name: bronze
+    description: "Bronze layer - raw/parsed data from ingestion"
+    database: workspace
+    schema: stm_bronze
+    tables:
+      - name: vehicle_positions
+        description: "Real-time vehicle positions from STM GTFS-RT API (parsed protobuf)"
+        columns:
+          - name: bus_id
+            description: "Vehicle identifier"
+          - name: trip_id
+            description: "Trip identifier"
+          - name: route_id
+            description: "Route identifier"
+          - name: latitude
+            description: "Vehicle latitude"
+          - name: longitude
+            description: "Vehicle longitude"
+          - name: event_timestamp
+            description: "Timestamp of position"
+            
+      - name: gtfs_agency
+        description: "Transit agency information (RAW STRING)"
+        
+      - name: gtfs_routes
+        description: "Route definitions (RAW STRING - needs casting)"
+        columns:
+          - name: route_id
+            description: "Unique route identifier"
+          - name: route_type
+            description: "Type of route (STRING - cast to INT in stg_)"
+            
+      - name: gtfs_stops
+        description: "Stop locations (RAW STRING - needs casting)"
+        columns:
+          - name: stop_id
+            description: "Unique stop identifier"
+          - name: stop_lat
+            description: "Latitude (STRING - cast to DOUBLE in stg_)"
+          - name: stop_lon
+            description: "Longitude (STRING - cast to DOUBLE in stg_)"
+            
+      - name: gtfs_trips
+        description: "Trip definitions (RAW STRING)"
+        
+      - name: gtfs_stop_times
+        description: "Stop times for each trip (RAW STRING)"
+        
+      - name: gtfs_calendar
+        description: "Service calendar (RAW STRING)"
+        
+      - name: gtfs_calendar_dates
+        description: "Calendar exceptions (RAW STRING)"
+        
+      - name: gtfs_shapes
+        description: "Route shapes/paths (RAW STRING)"
+        
+      - name: weather
+        description: "Weather observations from Open-Meteo API (ALL STRING)"
+        columns:
+          - name: observation_time
+            description: "Observation timestamp as string (e.g. 2026-01-15T08:00)"
+          - name: temperature
+            description: "Temperature in Celsius (STRING - cast to DOUBLE in stg_)"
+          - name: feels_like
+            description: "Feels-like temperature in Celsius (STRING - cast to DOUBLE in stg_)"
+          - name: humidity
+            description: "Relative humidity % (STRING - cast to INT in stg_)"
+          - name: wind_speed
+            description: "Wind speed km/h (STRING - cast to DOUBLE in stg_)"
+          - name: wind_direction
+            description: "Wind direction in degrees (STRING - cast to INT in stg_)"
+          - name: precipitation
+            description: "Precipitation in mm (STRING - cast to DOUBLE in stg_)"
+          - name: weather_code
+            description: "WMO weather code (STRING - cast to INT in stg_)"
+          - name: weather_description
+            description: "Human-readable weather description"

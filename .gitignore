@@ -1,0 +1,12 @@
+# dbt
+target/
+dbt_packages/
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets - NEVER commit
+profiles.yml
+*.env

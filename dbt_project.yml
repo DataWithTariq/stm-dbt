@@ -1,0 +1,24 @@
+name: 'stm_dbt'
+version: '1.0.0'
+
+profile: 'stm_dbt'
+
+model-paths: ["models"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  stm_dbt:
+    staging:
+      +schema: stm_silver
+      +materialized: view
+    silver:
+      +schema: stm_silver
+      +materialized: table
+    gold:
+      +schema: stm_gold
+      +materialized: table

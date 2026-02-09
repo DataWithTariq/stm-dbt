@@ -1,0 +1,181 @@
+version: 2
+
+models:
+  # ============ STAGING ============
+  - name: stg_weather
+    description: "Weather data cast to proper types"
+    columns:
+      - name: observation_time
+        tests: [not_null]
+      - name: observation_date
+        tests: [not_null]
+      - name: temperature_c
+        tests: [not_null]
+      - name: weather_category
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Clear', 'Cloudy', 'Fog', 'Drizzle', 'Rain', 'Snow', 'Rain Showers', 'Snow Showers', 'Thunderstorm', 'Unknown']
+
+  - name: stg_routes
+    description: "Route definitions cast to proper types"
+    columns:
+      - name: route_id
+        tests: [not_null, unique]
+      - name: route_type
+        tests: [not_null]
+
+  - name: stg_stops
+    description: "Stop locations cast to proper types"
+    columns:
+      - name: stop_id
+        tests: [not_null, unique]
+      - name: stop_lat
+        tests: [not_null]
+      - name: stop_lon
+        tests: [not_null]
+
+  - name: stg_vehicle_positions
+    description: "Vehicle positions cleaned"
+    columns:
+      - name: bus_id
+        tests: [not_null]
+      - name: event_timestamp
+        tests: [not_null]
+      - name: latitude
+        tests: [not_null]
+      - name: longitude
+        tests: [not_null]
+
+  - name: stg_trips
+    description: "Trip definitions cast to proper types"
+    columns:
+      - name: trip_id
+        tests: [not_null, unique]
+      - name: route_id
+        tests: [not_null]
+      - name: service_id
+        tests: [not_null]
+
+  - name: stg_stop_times
+    description: "Stop times cast to proper types"
+    columns:
+      - name: trip_id
+        tests: [not_null]
+      - name: stop_id
+        tests: [not_null]
+      - name: stop_sequence
+        tests: [not_null]
+
+  - name: stg_calendar
+    description: "Service calendar cast to proper types"
+    columns:
+      - name: service_id
+        tests: [not_null, unique]
+      - name: start_date
+        tests: [not_null]
+      - name: end_date
+        tests: [not_null]
+
+  - name: stg_calendar_dates
+    description: "Calendar exceptions cast to proper types"
+    columns:
+      - name: service_id
+        tests: [not_null]
+      - name: exception_date
+        tests: [not_null]
+      - name: exception_type
+        tests:
+          - not_null
+          - accepted_values:
+              values: [1, 2]
+
+  - name: stg_shapes
+    description: "Route shapes cast to proper types"
+    columns:
+      - name: shape_id
+        tests: [not_null]
+      - name: shape_pt_lat
+        tests: [not_null]
+      - name: shape_pt_lon
+        tests: [not_null]
+      - name: shape_pt_sequence
+        tests: [not_null]
+
+  - name: stg_agency
+    description: "Agency info cleaned"
+    columns:
+      - name: agency_id
+        tests: [not_null]
+
+  # ============ SILVER ============
+  - name: dim_routes
+    description: "Route dimension with business descriptions"
+    columns:
+      - name: route_id
+        tests: [not_null, unique]
+      - name: route_type_desc
+        tests: [not_null]
+
+  - name: dim_stops
+    description: "Stop dimension"
+    columns:
+      - name: stop_id
+        tests: [not_null, unique]
+
+  - name: dim_calendar
+    description: "Calendar dimension with service patterns"
+    columns:
+      - name: service_id
+        tests: [not_null, unique]
+      - name: service_pattern
+        tests:
+          - accepted_values:
+              values: ['Weekday', 'Weekend', 'Daily', 'Custom']
+
+  - name: fact_vehicle_positions
+    description: "Vehicle position facts"
+    columns:
+      - name: bus_id
+        tests: [not_null]
+      - name: event_timestamp
+        tests: [not_null]
+
+  - name: fact_trips
+    description: "Trip facts enriched with route info"
+    columns:
+      - name: trip_id
+        tests: [not_null, unique]
+      - name: route_id
+        tests: [not_null]
+
+  - name: fact_stop_times
+    description: "Stop time facts with denormalized context"
+    columns:
+      - name: trip_id
+        tests: [not_null]
+      - name: stop_id
+        tests: [not_null]
+
+  # ============ GOLD ============
+  - name: fct_daily_performance
+    description: "Daily route performance with weather context"
+    columns:
+      - name: event_date
+        tests: [not_null]
+      - name: route_id
+        tests: [not_null]
+
+  - name: fct_route_analytics
+    description: "Route-level analytics"
+    columns:
+      - name: route_id
+        tests: [not_null, unique]
+
+  - name: obt_positions_wide
+    description: "One Big Table for BI"
+    columns:
+      - name: bus_id
+        tests: [not_null]
+      - name: event_timestamp
+        tests: [not_null]

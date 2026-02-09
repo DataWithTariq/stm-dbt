@@ -7,18 +7,18 @@ Built on **Databricks** with **Delta Lake** and **dbt**, following modern data e
 ## Architecture
 
 ```
-┌─────────────────────┐     ┌──────────────┐     ┌──────────────────────────────┐
-│     DATA SOURCES     │     │    BRONZE     │     │   SILVER & GOLD (dbt)        │
-│                      │     │  (PySpark)    │     │                              │
-│  STM GTFS-RT API ────┼────►│ vehicle_pos   │     │  10 Staging Views            │
-│  (Protobuf, 5 min)   │     │              ├────►│  6 Silver Tables (dims/facts) │
-│                      │     │              │     │  3 Gold Tables (analytics)    │
-│  STM Static GTFS ────┼────►│ gtfs_*       │     │                              │
-│  (Monthly refresh)   │     │              │     │  57 Automated Data Tests      │
-│                      │     │              │     │                              │
-│  Open-Meteo API ─────┼────►│ weather      │     │                              │
-│  (Daily backfill)    │     │              │     │                              │
-└─────────────────────┘     └──────────────┘     └──────────────────────────────┘
+┌─────────────────────┐     ┌──────────────┐    ┌──────────────────────────────┐
+│     DATA SOURCES    │     │    BRONZE    │    │   SILVER & GOLD (dbt)        │
+│                     │     │  (PySpark)   │    │                              │
+│  STM GTFS-RT API ───┼────►│ vehicle_pos  │    │  10 Staging Views            │
+│  (Protobuf, 5 min   │     │              ├───►│  6 Silver Tables (dims/facts)│
+│                     │     │              │    │  3 Gold Tables (analytics)   │
+│  STM Static GTF ────┼────►│ gtfs_*       │    │                              │
+│  (Monthly refrsh)   │     │              │    │  57 Automated Data Tests     │
+│                     │     │              │    │                              │
+│  Open-Meteo PI ─────┼────►│ weather      │    │                              │
+│  (Daily bacfill)    │     │              │    │                              │
+└─────────────────────┘      └────────────┘     └──────────────────────────────┘
 ```
 
 ## Tech Stack

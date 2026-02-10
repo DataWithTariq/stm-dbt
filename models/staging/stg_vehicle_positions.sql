@@ -29,12 +29,12 @@ cleaned AS (
         current_status,
         occupancy_status,
         
-        -- Timestamps
-        event_timestamp,
+        -- Timestamps (UTC to Montreal)
+        CONVERT_TIMEZONE('UTC', 'America/Montreal', event_timestamp) AS event_timestamp,
         
         -- Derived fields
-        CAST(event_timestamp AS DATE) AS event_date,
-        HOUR(event_timestamp) AS event_hour,
+        CAST(CONVERT_TIMEZONE('UTC', 'America/Montreal', event_timestamp) AS DATE) AS event_date,
+        HOUR(CONVERT_TIMEZONE('UTC', 'America/Montreal', event_timestamp)) AS event_hour,
         
         -- Metadata (v2.0 names)
         ingestion_file AS _source_file,

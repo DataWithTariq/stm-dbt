@@ -22,7 +22,7 @@ cleaned AS (
         -- Position (already DOUBLE from Bronze)
         latitude,
         longitude,
-        speed,
+        ROUND(speed * 3.6, 1) AS speed_kmh,
         bearing,
         
         -- Status codes

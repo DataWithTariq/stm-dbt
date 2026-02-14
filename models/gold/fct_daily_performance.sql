@@ -1,24 +1,45 @@
 -- models/gold/fct_daily_performance.sql
--- Purpose: Daily route performance metrics WITH weather context
--- Input: fact_vehicle_positions, dim_routes, stg_weather
--- Output: stm_gold.fct_daily_performance
+-- Purpose: Daily route performance metrics with weather context
+-- Grain: 1 row per route_id × event_date
+-- Rule: Only additive measures (counts, sums). Ratios computed in Power BI DAX.
+-- FKs: route_id → dim_routes, event_date → dim_date
+
+{{ config(
+    materialized='table',
+    schema='stm_gold'
+) }}
 
 WITH positions AS (
     SELECT * FROM {{ ref('fact_vehicle_positions') }}
 ),
 
-routes AS (
-    SELECT * FROM {{ ref('dim_routes') }}
+-- Dominant weather per day (most frequent category)
+weather_counts AS (
+    SELECT
+        observation_date,
+        weather_category,
+        COUNT(*) AS cnt
+    FROM {{ ref('stg_weather') }}
+    GROUP BY observation_date, weather_category
 ),
 
--- Aggregate weather to daily level
 daily_weather AS (
     SELECT
         observation_date,
+        weather_category AS dominant_weather
+    FROM (
+        SELECT *,
+            ROW_NUMBER() OVER (PARTITION BY observation_date ORDER BY cnt DESC) AS rn
+        FROM weather_counts
+    )
+    WHERE rn = 1
+),
+
+-- Daily weather averages
+weather_agg AS (
+    SELECT
+        observation_date,
         ROUND(AVG(temperature_c), 1) AS avg_temperature_c,
-        ROUND(MIN(temperature_c), 1) AS min_temperature_c,
-        ROUND(MAX(temperature_c), 1) AS max_temperature_c,
-        ROUND(AVG(feels_like_c), 1) AS avg_feels_like_c,
         ROUND(AVG(humidity_pct), 0) AS avg_humidity_pct,
         ROUND(AVG(wind_speed_kmh), 1) AS avg_wind_speed_kmh,
         ROUND(SUM(precipitation_mm), 1) AS total_precipitation_mm
@@ -26,74 +47,85 @@ daily_weather AS (
     GROUP BY observation_date
 ),
 
--- Most common weather for each day
-dominant AS (
-    SELECT DISTINCT
-        observation_date,
-        FIRST_VALUE(weather_category) OVER (
-            PARTITION BY observation_date
-            ORDER BY precipitation_mm DESC
-        ) AS dominant_weather
-    FROM {{ ref('stg_weather') }}
-),
-
--- Aggregate positions by route and day
+-- Aggregate positions by route × day
 daily_positions AS (
     SELECT
         event_date,
         route_id,
+
+        -- Volume counts (additive)
         COUNT(*) AS total_positions,
         COUNT(DISTINCT bus_id) AS unique_vehicles,
         COUNT(DISTINCT trip_id) AS unique_trips,
-        ROUND(AVG(speed), 1) AS avg_speed,
+
+        -- Speed (additive: sum + count → DAX does DIVIDE)
+        SUM(speed) AS sum_speed,
+        SUM(CASE WHEN speed IS NOT NULL THEN 1 ELSE 0 END) AS count_speed_readings,
         ROUND(MAX(speed), 1) AS max_speed,
+
+        -- Occupancy counts (additive)
+        SUM(CASE WHEN occupancy_status = 0 THEN 1 ELSE 0 END) AS empty_count,
+        SUM(CASE WHEN occupancy_status = 1 THEN 1 ELSE 0 END) AS many_seats_count,
+        SUM(CASE WHEN occupancy_status = 2 THEN 1 ELSE 0 END) AS few_seats_count,
+        SUM(CASE WHEN occupancy_status = 3 THEN 1 ELSE 0 END) AS standing_count,
+        SUM(CASE WHEN occupancy_status = 5 THEN 1 ELSE 0 END) AS full_count,
+        SUM(CASE WHEN occupancy_status IN (3, 5) THEN 1 ELSE 0 END) AS overcrowded_count,
+        SUM(CASE WHEN occupancy_status IN (0, 1) THEN 1 ELSE 0 END) AS underused_count,
+
+        -- Time window
         MIN(event_timestamp) AS first_position_at,
         MAX(event_timestamp) AS last_position_at
+
     FROM positions
     GROUP BY event_date, route_id
 ),
 
 final AS (
     SELECT
-        -- Dimensions
+        -- FKs only (no descriptive columns)
         dp.event_date,
         dp.route_id,
-        r.route_short_name,
-        r.route_long_name,
-        r.route_type_desc,
 
-        -- Position metrics
+        -- Volume (additive)
         dp.total_positions,
         dp.unique_vehicles,
         dp.unique_trips,
-        dp.avg_speed,
+
+        -- Speed (additive — DAX computes avg)
+        dp.sum_speed,
+        dp.count_speed_readings,
         dp.max_speed,
+
+        -- Occupancy (additive — DAX computes %)
+        dp.empty_count,
+        dp.many_seats_count,
+        dp.few_seats_count,
+        dp.standing_count,
+        dp.full_count,
+        dp.overcrowded_count,
+        dp.underused_count,
+
+        -- Service window
         dp.first_position_at,
         dp.last_position_at,
-
-        -- Service hours (approx)
         ROUND(
             CAST(UNIX_TIMESTAMP(dp.last_position_at) - UNIX_TIMESTAMP(dp.first_position_at) AS DOUBLE) / 3600,
             1
         ) AS service_hours,
 
-        -- Weather context
-        w.avg_temperature_c,
-        w.min_temperature_c,
-        w.max_temperature_c,
-        w.avg_feels_like_c,
-        w.avg_humidity_pct,
-        w.avg_wind_speed_kmh,
-        w.total_precipitation_mm,
-        d.dominant_weather,
+        -- Weather context (degenerate dimension — low cardinality)
+        COALESCE(dw.dominant_weather, 'Unknown') AS dominant_weather,
+        wa.avg_temperature_c,
+        wa.avg_humidity_pct,
+        wa.avg_wind_speed_kmh,
+        wa.total_precipitation_mm,
 
         -- Metadata
         CURRENT_TIMESTAMP() AS _dbt_updated_at
 
     FROM daily_positions dp
-    LEFT JOIN routes r ON dp.route_id = r.route_id
-    LEFT JOIN daily_weather w ON dp.event_date = w.observation_date
-    LEFT JOIN dominant d ON dp.event_date = d.observation_date
+    LEFT JOIN daily_weather dw ON dp.event_date = dw.observation_date
+    LEFT JOIN weather_agg wa ON dp.event_date = wa.observation_date
 )
 
 SELECT * FROM final

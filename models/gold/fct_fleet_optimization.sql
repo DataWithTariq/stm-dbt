@@ -1,21 +1,16 @@
--- models/gold/fct_fleet_optimization.sql
--- Purpose: Fleet optimization recommendations based on occupancy, speed, weather, and coverage
--- Grain: 1 row per route
--- Business questions answered:
---   #1 Fleet Reallocation: Which routes need more/fewer buses?
---   #2 Peak Hour Overcrowding: When are routes most crowded?
---   #3 Speed Bottlenecks: Which routes are slowest?
---   #4 Weather Impact: Does weather affect crowding?
---   #5 Weekday vs Weekend: Service mismatch by day type?
---   #6 Service Coverage: Geographic spread per route
---   #7 Frequency vs Demand: High trips but empty? Low trips but packed?
+-- models/gold/fct_fleet_optimization_daily.sql
+-- Purpose: Daily fleet optimization metrics per route
+-- Grain: 1 row per route_id × event_date
+-- Rule: Only additive measures (counts, sums). All ratios and recommendations in DAX.
+-- FKs: route_id → dim_routes, event_date → dim_date
+-- Replaces: fct_fleet_optimization (which had pre-computed % — anti-pattern)
 
 {{ config(
     materialized='table',
     schema='stm_gold'
 ) }}
 
--- Step 1: Get dominant weather per day (most frequent category)
+-- Dominant weather per day
 WITH weather_counts AS (
     SELECT
         observation_date,
@@ -30,16 +25,15 @@ daily_weather AS (
         observation_date,
         weather_category AS dominant_weather
     FROM (
-        SELECT
-            *,
+        SELECT *,
             ROW_NUMBER() OVER (PARTITION BY observation_date ORDER BY cnt DESC) AS rn
         FROM weather_counts
     )
     WHERE rn = 1
 ),
 
--- Step 2: Enrich each position with route, weather, day type, time period
-base AS (
+-- Enrich each position with time period, day type
+enriched AS (
     SELECT
         p.route_id,
         p.bus_id,
@@ -49,9 +43,6 @@ base AS (
         p.speed,
         p.latitude,
         p.longitude,
-        r.route_short_name,
-        r.route_long_name,
-        r.route_type_desc,
         COALESCE(w.dominant_weather, 'Unknown') AS dominant_weather,
         CASE
             WHEN DAYOFWEEK(p.event_date) IN (1, 7) THEN 'Weekend'
@@ -63,138 +54,71 @@ base AS (
             ELSE 'Off Peak'
         END AS time_period
     FROM {{ ref('stg_vehicle_positions') }} p
-    LEFT JOIN {{ ref('dim_routes') }} r ON p.route_id = r.route_id
     LEFT JOIN daily_weather w ON p.event_date = w.observation_date
     WHERE p.occupancy_status IS NOT NULL
 ),
 
--- Step 3: Aggregate everything per route
-route_stats AS (
+-- Aggregate per route × day
+final AS (
     SELECT
+        -- FKs only
         route_id,
-        route_short_name,
-        route_long_name,
-        route_type_desc,
+        event_date,
+
+        -- Weather (degenerate dimension)
+        dominant_weather,
+
+        -- Day type
+        day_type,
+
+        -- ===========================================
+        -- VOLUME COUNTS (all additive)
+        -- ===========================================
         COUNT(*) AS total_positions,
         COUNT(DISTINCT bus_id) AS distinct_buses,
-        COUNT(DISTINCT event_date) AS days_observed,
 
         -- ===========================================
-        -- #1 FLEET REALLOCATION — Occupancy breakdown
+        -- OCCUPANCY COUNTS (additive — DAX computes %)
         -- ===========================================
-        ROUND(SUM(CASE WHEN occupancy_status = 0 THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 3) AS pct_empty,
-        ROUND(SUM(CASE WHEN occupancy_status = 1 THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 3) AS pct_many_seats,
-        ROUND(SUM(CASE WHEN occupancy_status = 2 THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 3) AS pct_few_seats,
-        ROUND(SUM(CASE WHEN occupancy_status = 3 THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 3) AS pct_standing,
-        ROUND(SUM(CASE WHEN occupancy_status = 5 THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 3) AS pct_full,
-        ROUND(SUM(CASE WHEN occupancy_status IN (3, 5) THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 3) AS overcrowded_pct,
-        ROUND(SUM(CASE WHEN occupancy_status IN (0, 1) THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 3) AS underused_pct,
+        SUM(CASE WHEN occupancy_status = 0 THEN 1 ELSE 0 END) AS empty_count,
+        SUM(CASE WHEN occupancy_status = 1 THEN 1 ELSE 0 END) AS many_seats_count,
+        SUM(CASE WHEN occupancy_status = 2 THEN 1 ELSE 0 END) AS few_seats_count,
+        SUM(CASE WHEN occupancy_status = 3 THEN 1 ELSE 0 END) AS standing_count,
+        SUM(CASE WHEN occupancy_status = 5 THEN 1 ELSE 0 END) AS full_count,
+        SUM(CASE WHEN occupancy_status IN (3, 5) THEN 1 ELSE 0 END) AS overcrowded_count,
+        SUM(CASE WHEN occupancy_status IN (0, 1) THEN 1 ELSE 0 END) AS underused_count,
 
         -- ===========================================
-        -- #2 PEAK HOUR OVERCROWDING
+        -- PEAK HOUR COUNTS (additive — DAX computes %)
         -- ===========================================
-        ROUND(SUM(CASE WHEN time_period = 'AM Peak' AND occupancy_status IN (3, 5) THEN 1 ELSE 0 END) * 1.0 /
-              NULLIF(SUM(CASE WHEN time_period = 'AM Peak' THEN 1 ELSE 0 END), 0), 3) AS overcrowded_pct_am_peak,
-        ROUND(SUM(CASE WHEN time_period = 'PM Peak' AND occupancy_status IN (3, 5) THEN 1 ELSE 0 END) * 1.0 /
-              NULLIF(SUM(CASE WHEN time_period = 'PM Peak' THEN 1 ELSE 0 END), 0), 3) AS overcrowded_pct_pm_peak,
-        ROUND(SUM(CASE WHEN time_period = 'Off Peak' AND occupancy_status IN (3, 5) THEN 1 ELSE 0 END) * 1.0 /
-              NULLIF(SUM(CASE WHEN time_period = 'Off Peak' THEN 1 ELSE 0 END), 0), 3) AS overcrowded_pct_off_peak,
+        SUM(CASE WHEN time_period = 'AM Peak' THEN 1 ELSE 0 END) AS am_peak_count,
+        SUM(CASE WHEN time_period = 'AM Peak' AND occupancy_status IN (3, 5) THEN 1 ELSE 0 END) AS am_peak_overcrowded_count,
+        SUM(CASE WHEN time_period = 'PM Peak' THEN 1 ELSE 0 END) AS pm_peak_count,
+        SUM(CASE WHEN time_period = 'PM Peak' AND occupancy_status IN (3, 5) THEN 1 ELSE 0 END) AS pm_peak_overcrowded_count,
+        SUM(CASE WHEN time_period = 'Off Peak' THEN 1 ELSE 0 END) AS off_peak_count,
+        SUM(CASE WHEN time_period = 'Off Peak' AND occupancy_status IN (3, 5) THEN 1 ELSE 0 END) AS off_peak_overcrowded_count,
 
         -- ===========================================
-        -- #3 SPEED BOTTLENECKS
+        -- SPEED (additive — DAX computes avg = sum/count)
         -- ===========================================
-        ROUND(AVG(speed), 1) AS avg_speed,
-        ROUND(AVG(CASE WHEN time_period = 'AM Peak' THEN speed END), 1) AS avg_speed_am_peak,
-        ROUND(AVG(CASE WHEN time_period = 'PM Peak' THEN speed END), 1) AS avg_speed_pm_peak,
-        ROUND(AVG(CASE WHEN time_period = 'Off Peak' THEN speed END), 1) AS avg_speed_off_peak,
+        SUM(speed) AS sum_speed,
+        SUM(CASE WHEN speed IS NOT NULL THEN 1 ELSE 0 END) AS count_speed_readings,
+        SUM(CASE WHEN time_period = 'AM Peak' THEN speed ELSE 0 END) AS sum_speed_am_peak,
+        SUM(CASE WHEN time_period = 'AM Peak' AND speed IS NOT NULL THEN 1 ELSE 0 END) AS count_speed_am_peak,
+        SUM(CASE WHEN time_period = 'PM Peak' THEN speed ELSE 0 END) AS sum_speed_pm_peak,
+        SUM(CASE WHEN time_period = 'PM Peak' AND speed IS NOT NULL THEN 1 ELSE 0 END) AS count_speed_pm_peak,
 
         -- ===========================================
-        -- #4 WEATHER IMPACT ON CROWDING
-        -- ===========================================
-        ROUND(SUM(CASE WHEN dominant_weather = 'Snow' AND occupancy_status IN (3, 5) THEN 1 ELSE 0 END) * 1.0 /
-              NULLIF(SUM(CASE WHEN dominant_weather = 'Snow' THEN 1 ELSE 0 END), 0), 3) AS overcrowded_pct_snow,
-        ROUND(SUM(CASE WHEN dominant_weather = 'Clear' AND occupancy_status IN (3, 5) THEN 1 ELSE 0 END) * 1.0 /
-              NULLIF(SUM(CASE WHEN dominant_weather = 'Clear' THEN 1 ELSE 0 END), 0), 3) AS overcrowded_pct_clear,
-        ROUND(SUM(CASE WHEN dominant_weather = 'Cloudy' AND occupancy_status IN (3, 5) THEN 1 ELSE 0 END) * 1.0 /
-              NULLIF(SUM(CASE WHEN dominant_weather = 'Cloudy' THEN 1 ELSE 0 END), 0), 3) AS overcrowded_pct_cloudy,
-
-        -- ===========================================
-        -- #5 WEEKDAY vs WEEKEND
-        -- ===========================================
-        ROUND(SUM(CASE WHEN day_type = 'Weekday' AND occupancy_status IN (3, 5) THEN 1 ELSE 0 END) * 1.0 /
-              NULLIF(SUM(CASE WHEN day_type = 'Weekday' THEN 1 ELSE 0 END), 0), 3) AS overcrowded_pct_weekday,
-        ROUND(SUM(CASE WHEN day_type = 'Weekend' AND occupancy_status IN (3, 5) THEN 1 ELSE 0 END) * 1.0 /
-              NULLIF(SUM(CASE WHEN day_type = 'Weekend' THEN 1 ELSE 0 END), 0), 3) AS overcrowded_pct_weekend,
-        ROUND(SUM(CASE WHEN day_type = 'Weekday' THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 3) AS pct_positions_weekday,
-        ROUND(SUM(CASE WHEN day_type = 'Weekend' THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 3) AS pct_positions_weekend,
-
-        -- ===========================================
-        -- #6 SERVICE COVERAGE (bounding box)
+        -- GEOGRAPHIC COVERAGE (for bounding box in DAX)
         -- ===========================================
         MIN(latitude) AS min_latitude,
         MAX(latitude) AS max_latitude,
         MIN(longitude) AS min_longitude,
         MAX(longitude) AS max_longitude
 
-    FROM base
-    GROUP BY route_id, route_short_name, route_long_name, route_type_desc
-    HAVING COUNT(*) >= 500
-),
-
--- Step 4: Add coverage area, route analytics, and recommendations
-final AS (
-    SELECT
-        rs.*,
-
-        -- #6 Coverage area (bounding box approximation in km²)
-        ROUND(
-            (rs.max_latitude - rs.min_latitude) * 111.0 *
-            (rs.max_longitude - rs.min_longitude) * 111.0 *
-            COS(RADIANS((rs.min_latitude + rs.max_latitude) / 2.0)),
-            2
-        ) AS coverage_area_km2,
-
-        -- #7 FREQUENCY vs DEMAND (from route analytics)
-        ra.total_trips,
-        ra.total_stops,
-        ra.outbound_trips,
-        ra.inbound_trips,
-        ra.avg_stops_per_trip,
-
-        -- ===========================================
-        -- FLEET RECOMMENDATION
-        -- ===========================================
-        CASE
-            WHEN rs.overcrowded_pct >= 0.30 THEN 'Add Buses'
-            WHEN rs.overcrowded_pct >= 0.20 THEN 'Monitor'
-            WHEN rs.underused_pct >= 0.90 THEN 'Reduce Buses'
-            WHEN rs.underused_pct >= 0.80 THEN 'Schedule Review'
-            ELSE 'Optimal'
-        END AS fleet_recommendation,
-
-        -- Priority score (higher = needs attention first)
-        CASE
-            WHEN rs.overcrowded_pct >= 0.30 THEN rs.overcrowded_pct
-            WHEN rs.underused_pct >= 0.90 THEN rs.underused_pct
-            ELSE 0
-        END AS priority_score,
-
-        -- #7 Demand-frequency mismatch detection
-        CASE
-            WHEN rs.overcrowded_pct >= 0.25 AND ra.total_trips < 2000
-                THEN 'High Demand · Low Frequency'
-            WHEN rs.underused_pct >= 0.80 AND ra.total_trips > 3000
-                THEN 'Low Demand · High Frequency'
-            ELSE 'Balanced'
-        END AS demand_frequency_match,
-
-        -- Weather sensitivity score (snow overcrowding minus clear overcrowding)
-        ROUND(COALESCE(rs.overcrowded_pct_snow, 0) - COALESCE(rs.overcrowded_pct_clear, 0), 3)
-            AS weather_sensitivity
-
-    FROM route_stats rs
-    LEFT JOIN {{ ref('fct_route_analytics') }} ra ON rs.route_id = ra.route_id
+    FROM enriched
+    GROUP BY route_id, event_date, dominant_weather, day_type
+    HAVING COUNT(*) >= 10
 )
 
 SELECT * FROM final
-ORDER BY priority_score DESC

@@ -1,8 +1,9 @@
 -- models/gold/fct_occupancy_by_hour.sql
--- Purpose: Hourly occupancy breakdown per route for detailed analysis
--- Grain: 1 row per route × hour (max ~211 routes × 24 hours = ~5K rows)
--- Use case: Power BI heatmap showing which routes are crowded at which hours
--- Enables drill-down from fct_fleet_optimization summary
+-- Purpose: Hourly occupancy breakdown per route per day
+-- Grain: 1 row per route_id × event_date × event_hour
+-- Rule: Only additive measures (counts, sums). Ratios computed in DAX.
+-- FKs: route_id → dim_routes, event_date → dim_date
+-- Use case: Power BI heatmap (route × hour), hourly drill-down
 
 {{ config(
     materialized='table',
@@ -10,32 +11,29 @@
 ) }}
 
 SELECT
+    -- FKs only
     p.route_id,
-    r.route_short_name,
-    r.route_long_name,
+    p.event_date,
     p.event_hour,
 
-    -- Volume
+    -- Volume (additive)
     COUNT(*) AS total_positions,
     COUNT(DISTINCT p.bus_id) AS active_buses,
-    COUNT(DISTINCT p.event_date) AS days_observed,
-    ROUND(COUNT(*) * 1.0 / COUNT(DISTINCT p.event_date), 0) AS avg_positions_per_day,
 
-    -- Speed
-    ROUND(AVG(p.speed), 1) AS avg_speed,
+    -- Speed (additive — DAX computes avg = sum/count)
+    SUM(p.speed) AS sum_speed,
+    SUM(CASE WHEN p.speed IS NOT NULL THEN 1 ELSE 0 END) AS count_speed_readings,
 
-    -- Occupancy distribution (decimal for Power BI % formatting)
-    ROUND(SUM(CASE WHEN p.occupancy_status = 0 THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 3) AS pct_empty,
-    ROUND(SUM(CASE WHEN p.occupancy_status = 1 THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 3) AS pct_many_seats,
-    ROUND(SUM(CASE WHEN p.occupancy_status = 2 THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 3) AS pct_few_seats,
-    ROUND(SUM(CASE WHEN p.occupancy_status = 3 THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 3) AS pct_standing,
-    ROUND(SUM(CASE WHEN p.occupancy_status = 5 THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 3) AS pct_full,
+    -- Occupancy counts (additive — DAX computes %)
+    SUM(CASE WHEN p.occupancy_status = 0 THEN 1 ELSE 0 END) AS empty_count,
+    SUM(CASE WHEN p.occupancy_status = 1 THEN 1 ELSE 0 END) AS many_seats_count,
+    SUM(CASE WHEN p.occupancy_status = 2 THEN 1 ELSE 0 END) AS few_seats_count,
+    SUM(CASE WHEN p.occupancy_status = 3 THEN 1 ELSE 0 END) AS standing_count,
+    SUM(CASE WHEN p.occupancy_status = 5 THEN 1 ELSE 0 END) AS full_count,
+    SUM(CASE WHEN p.occupancy_status IN (3, 5) THEN 1 ELSE 0 END) AS overcrowded_count,
+    SUM(CASE WHEN p.occupancy_status IN (0, 1) THEN 1 ELSE 0 END) AS underused_count,
 
-    -- Key metrics
-    ROUND(SUM(CASE WHEN p.occupancy_status IN (3, 5) THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 3) AS overcrowded_pct,
-    ROUND(SUM(CASE WHEN p.occupancy_status IN (0, 1) THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 3) AS underused_pct,
-
-    -- Time period label
+    -- Time period label (degenerate dimension)
     CASE
         WHEN p.event_hour BETWEEN 6 AND 9 THEN 'AM Peak'
         WHEN p.event_hour BETWEEN 15 AND 18 THEN 'PM Peak'
@@ -43,7 +41,6 @@ SELECT
     END AS time_period
 
 FROM {{ ref('stg_vehicle_positions') }} p
-LEFT JOIN {{ ref('dim_routes') }} r ON p.route_id = r.route_id
 WHERE p.occupancy_status IS NOT NULL
-GROUP BY p.route_id, r.route_short_name, r.route_long_name, p.event_hour
-HAVING COUNT(*) >= 100
+GROUP BY p.route_id, p.event_date, p.event_hour
+HAVING COUNT(*) >= 5

@@ -1,14 +1,19 @@
 version: 2
 
 models:
-  # ============ STAGING ============
+  # ============================================================
+  # STAGING — Type casting, cleaning, business logic
+  # ============================================================
   - name: stg_weather
-    description: "Weather data cast to proper types"
+    description: "Hourly weather observations for Montreal from Open-Meteo API"
     columns:
       - name: observation_time
         tests: [not_null]
       - name: observation_date
         tests: [not_null]
+      - name: observation_hour
+        tests:
+          - not_null
       - name: temperature_c
         tests: [not_null]
       - name: weather_category
@@ -18,15 +23,18 @@ models:
               values: ['Clear', 'Cloudy', 'Fog', 'Drizzle', 'Rain', 'Snow', 'Rain Showers', 'Snow Showers', 'Thunderstorm', 'Unknown']
 
   - name: stg_routes
-    description: "Route definitions cast to proper types"
+    description: "GTFS route definitions with type casting"
     columns:
       - name: route_id
         tests: [not_null, unique]
       - name: route_type
-        tests: [not_null]
+        tests:
+          - not_null
+          - accepted_values:
+              values: [1, 3]
 
   - name: stg_stops
-    description: "Stop locations cast to proper types"
+    description: "GTFS stop locations with GPS coordinates"
     columns:
       - name: stop_id
         tests: [not_null, unique]
@@ -36,7 +44,7 @@ models:
         tests: [not_null]
 
   - name: stg_vehicle_positions
-    description: "Vehicle positions cleaned"
+    description: "Real-time bus positions cleaned with UTC→Montreal timezone conversion"
     columns:
       - name: bus_id
         tests: [not_null]
@@ -46,9 +54,15 @@ models:
         tests: [not_null]
       - name: longitude
         tests: [not_null]
+      - name: route_id
+        tests: [not_null]
+      - name: event_date
+        tests: [not_null]
+      - name: event_hour
+        tests: [not_null]
 
   - name: stg_trips
-    description: "Trip definitions cast to proper types"
+    description: "GTFS trip definitions with route and service references"
     columns:
       - name: trip_id
         tests: [not_null, unique]
@@ -58,7 +72,7 @@ models:
         tests: [not_null]
 
   - name: stg_stop_times
-    description: "Stop times cast to proper types"
+    description: "GTFS scheduled stop times per trip"
     columns:
       - name: trip_id
         tests: [not_null]
@@ -68,7 +82,7 @@ models:
         tests: [not_null]
 
   - name: stg_calendar
-    description: "Service calendar cast to proper types"
+    description: "GTFS service calendar with day-of-week flags"
     columns:
       - name: service_id
         tests: [not_null, unique]
@@ -78,7 +92,7 @@ models:
         tests: [not_null]
 
   - name: stg_calendar_dates
-    description: "Calendar exceptions cast to proper types"
+    description: "GTFS calendar exceptions (added/removed service)"
     columns:
       - name: service_id
         tests: [not_null]
@@ -91,7 +105,7 @@ models:
               values: [1, 2]
 
   - name: stg_shapes
-    description: "Route shapes cast to proper types"
+    description: "GTFS route geometry points"
     columns:
       - name: shape_id
         tests: [not_null]
@@ -103,28 +117,35 @@ models:
         tests: [not_null]
 
   - name: stg_agency
-    description: "Agency info cleaned"
+    description: "GTFS transit agency info"
     columns:
       - name: agency_id
         tests: [not_null]
 
-  # ============ SILVER ============
+  # ============================================================
+  # SILVER — Dimension and Fact tables (star schema)
+  # ============================================================
   - name: dim_routes
-    description: "Route dimension with business descriptions"
+    description: "Route dimension — single source of truth for route attributes"
     columns:
       - name: route_id
         tests: [not_null, unique]
-      - name: route_type_desc
+      - name: route_short_name
         tests: [not_null]
+      - name: route_type_desc
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Subway/Metro', 'Bus']
 
   - name: dim_stops
-    description: "Stop dimension"
+    description: "Stop dimension with GPS coordinates"
     columns:
       - name: stop_id
         tests: [not_null, unique]
 
   - name: dim_calendar
-    description: "Calendar dimension with service patterns"
+    description: "Calendar dimension with service pattern classification"
     columns:
       - name: service_id
         tests: [not_null, unique]
@@ -133,49 +154,176 @@ models:
           - accepted_values:
               values: ['Weekday', 'Weekend', 'Daily', 'Custom']
 
+  - name: dim_date
+    description: "Date dimension generated from 2025-01-01 to 2026-12-31"
+    columns:
+      - name: date_key
+        tests: [not_null, unique]
+      - name: weekday_label
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Weekday', 'Weekend']
+
   - name: fact_vehicle_positions
-    description: "Vehicle position facts"
+    description: "Deduplicated vehicle positions with dimension keys"
     columns:
       - name: bus_id
         tests: [not_null]
       - name: event_timestamp
         tests: [not_null]
+      - name: route_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_routes')
+              field: route_id
+              severity: warn
 
   - name: fact_trips
-    description: "Trip facts enriched with route info"
+    description: "Trips enriched with route context and direction labels"
     columns:
       - name: trip_id
         tests: [not_null, unique]
       - name: route_id
-        tests: [not_null]
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_routes')
+              field: route_id
+      - name: direction_label
+        tests:
+          - accepted_values:
+              values: ['Outbound', 'Inbound']
 
   - name: fact_stop_times
-    description: "Stop time facts with denormalized context"
+    description: "Stop times denormalized with stop/trip/route context"
     columns:
       - name: trip_id
         tests: [not_null]
       - name: stop_id
-        tests: [not_null]
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_stops')
+              field: stop_id
 
-  # ============ GOLD ============
+  # ============================================================
+  # GOLD — Analytics tables (additive measures for BI)
+  # ============================================================
   - name: fct_daily_performance
-    description: "Daily route performance with weather context"
+    description: "Daily route performance with weather — additive measures only"
     columns:
       - name: event_date
-        tests: [not_null]
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
       - name: route_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_routes')
+              field: route_id
+              severity: warn
+      - name: total_positions
+        description: "Count of GPS pings — additive"
         tests: [not_null]
+      - name: overcrowded_count
+        description: "Positions with standing or full status — additive"
+        tests: [not_null]
+      - name: dominant_weather
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Clear', 'Cloudy', 'Fog', 'Drizzle', 'Rain', 'Snow', 'Rain Showers', 'Snow Showers', 'Thunderstorm', 'Unknown']
+
+  - name: fct_fleet_optimization
+    description: "Daily fleet optimization metrics per route — additive measures, ratios computed in DAX"
+    columns:
+      - name: event_date
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: route_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_routes')
+              field: route_id
+              severity: warn
+      - name: total_positions
+        tests: [not_null]
+      - name: overcrowded_count
+        tests: [not_null]
+      - name: underused_count
+        tests: [not_null]
+      - name: dominant_weather
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Clear', 'Cloudy', 'Fog', 'Drizzle', 'Rain', 'Snow', 'Rain Showers', 'Snow Showers', 'Thunderstorm', 'Unknown']
+      - name: day_type
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Weekday', 'Weekend']
+
+  - name: fct_occupancy_by_hour
+    description: "Hourly occupancy per route per day — additive measures for heatmap drill-down"
+    columns:
+      - name: event_date
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: route_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_routes')
+              field: route_id
+              severity: warn
+      - name: event_hour
+        tests: [not_null]
+      - name: total_positions
+        tests: [not_null]
+      - name: overcrowded_count
+        tests: [not_null]
+      - name: time_period
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['AM Peak', 'PM Peak', 'Off Peak']
 
   - name: fct_route_analytics
-    description: "Route-level analytics"
+    description: "Route-level GTFS schedule statistics — trip counts, stop coverage"
     columns:
       - name: route_id
-        tests: [not_null, unique]
+        tests:
+          - not_null
+          - unique
+          - relationships:
+              to: ref('dim_routes')
+              field: route_id
+              severity: warn
+      - name: total_trips
+        tests: [not_null]
+      - name: total_stops
+        tests: [not_null]
 
   - name: obt_positions_wide
-    description: "One Big Table for BI"
+    description: "One Big Table — every position with route + weather joined for ad-hoc BI queries"
     columns:
       - name: bus_id
         tests: [not_null]
       - name: event_timestamp
+        tests: [not_null]
+      - name: route_id
+        tests: [not_null]
+      - name: event_date
         tests: [not_null]

@@ -24,8 +24,10 @@ Every winter in Montreal, thousands of riders watch overcrowded buses pass their
 Analysis of 211 routes over 14 days revealed a **16.3% network-wide overcrowding rate**, with significant variation across routes:
 
 - **15 routes need additional buses** — overcrowded 30%+ of the time (e.g. Sherbrooke corridor)
-- **82 routes are candidates for reduction** — underused 90%+ of the time
+- **30 routes are candidates for reduction** — underused 90%+ of the time
 - **Net opportunity**: Reallocating just 10% of capacity from empty routes to overcrowded corridors could serve thousands more riders daily with zero additional cost
+  
+<img width="1818" height="1094" alt="image" src="https://github.com/user-attachments/assets/f65a21af-41d3-4dd4-b013-fe54ce726d42" />
 
 ### Weather Impact on Demand
 Snow events increase overcrowding by **+5 to +15 percentage points** on major corridors — riders who normally walk or cycle switch to transit. Routes like Sherbrooke (105, 24, 185) absorb the most weather-driven demand.

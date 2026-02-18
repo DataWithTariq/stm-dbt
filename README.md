@@ -30,6 +30,7 @@ Analysis of 211 routes over 18 days revealed a **16.0% network-wide overcrowding
 - **Net opportunity**: Reallocating capacity from the 30 underused routes to the 15 overcrowded corridors could serve thousands more riders daily with zero additional cost
 
 ### Fleet Imbalance — The Mirror View
+![STM Imbalance](docs/PowerBi Dashboard/Fleet Overview.png)
 By comparing the top overcrowded routes against the top underused routes (filtered to major routes by network volume share), the platform reveals a clear reallocation path:
 - **Overcrowded side**: Sherbrooke (37%), Jean-Talon (36%), Viau (35%) — buses running at standing room or full
 - **Underused side**: Saint-Charles (84%), Pointe-aux-Trembles (81%), Monk (69%) — buses running near-empty
@@ -38,13 +39,14 @@ By comparing the top overcrowded routes against the top underused routes (filter
 - **30 routes are candidates for reduction** — underused 90%+ of the time
 - **Net opportunity**: Reallocating just 10% of capacity from empty routes to overcrowded corridors could serve thousands more riders daily with zero additional cost
   
-<img width="1818" height="1094" alt="image" src="https://github.com/user-attachments/assets/f65a21af-41d3-4dd4-b013-fe54ce726d42" />
->>>>>>> c178755a28f5b3225f446b50aa95f0f47a0ed491
+![STM optimization](docs/PowerBi Dashboard/Fleet Optimization.png)
 
 ### Weather Impact on Demand
 Using `snow_hours` (hours of snowfall per day) instead of dominant weather category provides more accurate analysis. Days with **4+ hours of snow** show measurably higher overcrowding compared to snow-free days.
 
 Example: Express Sherbrooke sees **47.0% overcrowding on snow days (4h+)** vs **39.4% on non-snow days** — a +7.6 percentage point difference. Riders who normally walk or cycle switch to transit during sustained snowfall.
+
+![STM Weather](docs/PowerBi Dashboard/Weather Impact Analysis.png)
 
 **Actionable recommendation**: Pre-position extra buses on high-sensitivity corridors during snow forecasts, and verify shelter infrastructure at high-demand stops.
 

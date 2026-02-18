@@ -83,8 +83,10 @@ A scatter plot analysis of trips-per-stop reveals three distinct route categorie
 │                      │     │ quarantine   │     │         │  5 Pages     │         │
 └──────────────────────┘     └──────────────┘     └─────────┴──────────────┴─────────┘
 
-![STM Architecture](docs/stm_architecture.png)
+
 ```
+
+![STM Architecture](docs/stm_architecture.png)
 
 > **Scope**: 215 bus routes. Metro excluded — subway vehicles use internal signaling, not GPS via GTFS-RT.
 

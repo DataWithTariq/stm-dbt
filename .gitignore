@@ -2,7 +2,7 @@
 target/
 dbt_packages/
 logs/
-docs/PowerBi Dashboard/
+
 
 # OS
 .DS_Store

@@ -23,7 +23,7 @@ Every winter in Montreal, thousands of riders watch overcrowded buses pass their
 ### Fleet Optimization
 Analysis of 211 routes over 18 days revealed a **16.0% network-wide overcrowding rate**, with significant variation across routes:
 
-<<<<<<< HEAD
+
 - **15 routes need additional buses** — overcrowded 30%+ of the time (Sherbrooke at 37%, Jean-Talon Est at 36%, Viau at 35%)
 - **30 routes are candidates for reduction** — underused 90%+ of the time
 - **100 routes are operating optimally** (47.4% of the network)
@@ -34,7 +34,6 @@ By comparing the top overcrowded routes against the top underused routes (filter
 - **Overcrowded side**: Sherbrooke (37%), Jean-Talon (36%), Viau (35%) — buses running at standing room or full
 - **Underused side**: Saint-Charles (84%), Pointe-aux-Trembles (81%), Monk (69%) — buses running near-empty
 - The actionable insight: move buses from the right column to the left column
-=======
 - **15 routes need additional buses** — overcrowded 30%+ of the time (e.g. Sherbrooke corridor)
 - **30 routes are candidates for reduction** — underused 90%+ of the time
 - **Net opportunity**: Reallocating just 10% of capacity from empty routes to overcrowded corridors could serve thousands more riders daily with zero additional cost
@@ -70,7 +69,7 @@ A scatter plot analysis of trips-per-stop reveals three distinct route categorie
 ## Architecture
 
 ```
-┌─────────────────────┐     ┌──────────────┐     ┌──────────────────────────────────┐
+┌──────────────────────┐     ┌──────────────┐     ┌──────────────────────────────────┐
 │    DATA SOURCES      │     │   BRONZE     │     │     SILVER & GOLD (dbt)          │
 │                      │     │  (PySpark)   │     │                                  │
 │  STM GTFS-RT API ────┼────►│ vehicle_pos  │     │  10 Staging Views                │

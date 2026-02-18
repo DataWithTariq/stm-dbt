@@ -47,6 +47,14 @@ weather_agg AS (
     GROUP BY observation_date
 ),
 
+snow_check AS (
+    SELECT
+        observation_date,
+        SUM(CASE WHEN weather_category = 'Snow' THEN 1 ELSE 0 END) AS snow_hours
+    FROM {{ ref('stg_weather') }}
+    GROUP BY observation_date
+),
+
 -- Aggregate positions by route × day
 daily_positions AS (
     SELECT
@@ -119,6 +127,7 @@ final AS (
         wa.avg_humidity_pct,
         wa.avg_wind_speed_kmh,
         wa.total_precipitation_mm,
+        COALESCE(sc.snow_hours, 0) AS snow_hours,
 
         -- Metadata
         CURRENT_TIMESTAMP() AS _dbt_updated_at
@@ -126,6 +135,7 @@ final AS (
     FROM daily_positions dp
     LEFT JOIN daily_weather dw ON dp.event_date = dw.observation_date
     LEFT JOIN weather_agg wa ON dp.event_date = wa.observation_date
+    LEFT JOIN snow_check sc ON dp.event_date = sc.observation_date
 )
 
 SELECT * FROM final

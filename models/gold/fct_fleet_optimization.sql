@@ -1,9 +1,8 @@
--- models/gold/fct_fleet_optimization_daily.sql
+-- models/gold/fct_fleet_optimization.sql
 -- Purpose: Daily fleet optimization metrics per route
 -- Grain: 1 row per route_id × event_date
 -- Rule: Only additive measures (counts, sums). All ratios and recommendations in DAX.
 -- FKs: route_id → dim_routes, event_date → dim_date
--- Replaces: fct_fleet_optimization (which had pre-computed % — anti-pattern)
 
 {{ config(
     materialized='table',
@@ -32,6 +31,14 @@ daily_weather AS (
     WHERE rn = 1
 ),
 
+snow_check AS (
+    SELECT
+        observation_date,
+        SUM(CASE WHEN weather_category = 'Snow' THEN 1 ELSE 0 END) AS snow_hours
+    FROM {{ ref('stg_weather') }}
+    GROUP BY observation_date
+),
+
 -- Enrich each position with time period, day type
 enriched AS (
     SELECT
@@ -44,6 +51,7 @@ enriched AS (
         p.latitude,
         p.longitude,
         COALESCE(w.dominant_weather, 'Unknown') AS dominant_weather,
+        COALESCE(sc.snow_hours, 0) AS snow_hours,
         CASE
             WHEN DAYOFWEEK(p.event_date) IN (1, 7) THEN 'Weekend'
             ELSE 'Weekday'
@@ -55,6 +63,7 @@ enriched AS (
         END AS time_period
     FROM {{ ref('stg_vehicle_positions') }} p
     LEFT JOIN daily_weather w ON p.event_date = w.observation_date
+    LEFT JOIN snow_check sc ON p.event_date = sc.observation_date
     WHERE p.occupancy_status IS NOT NULL
 ),
 
@@ -67,6 +76,7 @@ final AS (
 
         -- Weather (degenerate dimension)
         dominant_weather,
+        snow_hours,
 
         -- Day type
         day_type,
@@ -117,7 +127,7 @@ final AS (
         MAX(longitude) AS max_longitude
 
     FROM enriched
-    GROUP BY route_id, event_date, dominant_weather, day_type
+    GROUP BY route_id, event_date, dominant_weather, snow_hours, day_type
     HAVING COUNT(*) >= 10
 )
 

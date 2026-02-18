@@ -1,6 +1,6 @@
 # 🚍 STM Real-Time Transit Data Platform
 
-A production-grade data engineering platform analyzing **1.6M+ GPS positions** from Montreal's STM bus network to generate **fleet optimization recommendations** — helping transit planners add buses where riders need them most and reduce waste on underused routes.
+A production-grade data engineering platform analyzing ** daily 160k+ GPS positions** from Montreal's STM bus network to generate **fleet optimization recommendations** — helping transit planners add buses where riders need them most and reduce waste on underused routes.
 
 Built on **Databricks** with **Delta Lake** and **dbt**, following modern data engineering best practices: medallion architecture, star schema modeling, additive measures pattern, automated data quality, and full orchestration.
 
@@ -8,7 +8,7 @@ Built on **Databricks** with **Delta Lake** and **dbt**, following modern data e
 
 ## The Business Problem
 
-Every winter in Montreal, thousands of riders watch overcrowded buses pass their stop — meanwhile, other routes run nearly empty. The STM operates **211 bus routes** but lacks granular, data-driven insights to dynamically reallocate fleet capacity.
+Every winter in Montreal, thousands of riders watch overcrowded buses pass their stop — meanwhile, other routes run nearly empty. The STM operates **215 bus routes** but lacks granular, data-driven insights to dynamically reallocate fleet capacity.
 
 **This platform answers:**
 - Which routes are consistently overcrowded and need more buses?
@@ -21,23 +21,41 @@ Every winter in Montreal, thousands of riders watch overcrowded buses pass their
 ## Key Business Insights
 
 ### Fleet Optimization
-Analysis of 211 routes over 14 days revealed a **16.3% network-wide overcrowding rate**, with significant variation across routes:
+Analysis of 211 routes over 18 days revealed a **16.0% network-wide overcrowding rate**, with significant variation across routes:
 
-- **15 routes need additional buses** — overcrowded 30%+ of the time (e.g. Sherbrooke corridor)
-- **82 routes are candidates for reduction** — underused 90%+ of the time
-- **Net opportunity**: Reallocating just 10% of capacity from empty routes to overcrowded corridors could serve thousands more riders daily with zero additional cost
+- **15 routes need additional buses** — overcrowded 30%+ of the time (Sherbrooke at 37%, Jean-Talon Est at 36%, Viau at 35%)
+- **30 routes are candidates for reduction** — underused 90%+ of the time
+- **100 routes are operating optimally** (47.4% of the network)
+- **Net opportunity**: Reallocating capacity from the 30 underused routes to the 15 overcrowded corridors could serve thousands more riders daily with zero additional cost
+
+### Fleet Imbalance — The Mirror View
+By comparing the top overcrowded routes against the top underused routes (filtered to major routes by network volume share), the platform reveals a clear reallocation path:
+- **Overcrowded side**: Sherbrooke (37%), Jean-Talon (36%), Viau (35%) — buses running at standing room or full
+- **Underused side**: Saint-Charles (84%), Pointe-aux-Trembles (81%), Monk (69%) — buses running near-empty
+- The actionable insight: move buses from the right column to the left column
 
 ### Weather Impact on Demand
-Snow events increase overcrowding by **+5 to +15 percentage points** on major corridors — riders who normally walk or cycle switch to transit. Routes like Sherbrooke (105, 24, 185) absorb the most weather-driven demand.
+Using `snow_hours` (hours of snowfall per day) instead of dominant weather category provides more accurate analysis. Days with **4+ hours of snow** show measurably higher overcrowding compared to snow-free days.
+
+Example: Express Sherbrooke sees **47.0% overcrowding on snow days (4h+)** vs **39.4% on non-snow days** — a +7.6 percentage point difference. Riders who normally walk or cycle switch to transit during sustained snowfall.
 
 **Actionable recommendation**: Pre-position extra buses on high-sensitivity corridors during snow forecasts, and verify shelter infrastructure at high-demand stops.
 
 ### Peak Hour Analysis
-- **AM Peak (6-9h)** and **PM Peak (15-18h)** show the highest overcrowding, but some routes experience demand spikes during off-peak hours — suggesting schedule review rather than fleet additions
-- Weekday vs Weekend patterns differ significantly: some routes flip from overcrowded to empty on weekends
+- **Peak hour at 16:00** (4 PM) with the highest bus deployment across the network
+- **75.9% of all service volume** occurs on weekdays
+- **PM Peak (3-6 PM)** shows the highest total volume, followed by AM Peak (6-9 AM)
+- Service drops sharply after 9 PM — some routes flip from overcrowded during peaks to near-empty off-peak, suggesting schedule review rather than fleet additions
+- The Day × Hour heatmap reveals that Thursday and Friday afternoons carry the heaviest load
 
 ### Corridor-Level Analysis
 Multiple routes share the same corridor (e.g. Sherbrooke = routes 105 + 24 + 185). By aggregating at the corridor level using additive measures, the platform reveals whether overcrowding is a route-specific issue or a corridor-wide capacity problem — a distinction that changes the operational response.
+
+### Service Frequency vs Coverage
+A scatter plot analysis of trips-per-stop reveals three distinct route categories:
+- **High Frequency (green)**: 30+ trips per stop — major corridors like YUL Aéroport (747), Côte-des-Neiges (165)
+- **Medium Frequency (yellow)**: 10-30 trips per stop — standard urban routes
+- **Low Frequency (red)**: <10 trips per stop — high infrastructure cost for minimal service, candidates for restructuring
 
 ---
 
@@ -59,7 +77,7 @@ Multiple routes share the same corridor (e.g. Sherbrooke = routes 105 + 24 + 185
 └──────────────────────┘     └──────────────┘     └─────────┴──────────────┴─────────┘
 ```
 
-> **Scope**: 211 bus routes. Metro excluded — subway vehicles use internal signaling, not GPS via GTFS-RT.
+> **Scope**: 215 bus routes. Metro excluded — subway vehicles use internal signaling, not GPS via GTFS-RT.
 
 ---
 
@@ -128,8 +146,8 @@ All Gold fact tables follow the **additive measures pattern**: only raw counts a
 
 | Model | Grain | Purpose |
 |-------|-------|---------|
-| `fct_daily_performance` | route × day | Daily route metrics + weather context |
-| `fct_fleet_optimization` | route × day | Fleet optimization: overcrowding counts, peak hour breakdowns, speed by period |
+| `fct_daily_performance` | route × day | Daily route metrics + weather context (temperature, precipitation, snow_hours) |
+| `fct_fleet_optimization` | route × day | Fleet optimization: overcrowding counts, peak hour breakdowns, speed by period, snow_hours |
 | `fct_occupancy_by_hour` | route × day × hour | Hourly occupancy for heatmap drill-down and peak analysis |
 | `fct_route_analytics` | route | GTFS schedule statistics: trip counts, stop coverage, direction balance |
 | `obt_positions_wide` | position | One Big Table — every GPS position with route + hourly weather. Designed as a semantic layer for ad-hoc BI queries and AI/ML workloads |
@@ -151,7 +169,7 @@ All Gold fact tables follow the **additive measures pattern**: only raw counts a
 **Design principles:**
 - **FK-only facts** — Route names live in `dim_routes` only, not duplicated across fact tables
 - **Additive measures** — Facts store counts and sums (`overcrowded_count`, `sum_speed`), never pre-calculated percentages
-- **Degenerate dimensions** — Low-cardinality attributes like `dominant_weather` and `day_type` stay in facts
+- **Degenerate dimensions** — Low-cardinality attributes like `dominant_weather`, `day_type`, and `snow_hours` stay in facts
 
 ---
 
@@ -159,13 +177,20 @@ All Gold fact tables follow the **additive measures pattern**: only raw counts a
 
 5 interactive pages with dynamic DAX measures computed from additive base metrics:
 
-| Page | Focus |
-|------|-------|
-| **Fleet Overview** | Network-wide KPIs: total positions, active buses, peak hours, weekday/weekend split |
-| **Weather Impact Analysis** | Snow vs Clear overcrowding, weather sensitivity by route, corridor-level impact |
-| **Route Analysis** | GTFS schedule insights: trip counts, stop coverage, direction balance, top routes |
-| **Service Time Patterns** | Hourly demand heatmap, time band analysis, AM/PM peak patterns |
-| **Fleet Optimization** | Actionable recommendations: Add Buses / Monitor / Reduce / Schedule Review |
+### Fleet Overview
+Network-wide operational snapshot: GPS coverage map of Montreal, fleet imbalance mirror chart (overcrowded vs underused top routes by volume), average active buses by hour showing dual AM/PM peaks, and KPIs (2.47M positions, 1,630 unique buses, 215 routes, 14 km/h avg speed).
+
+### Weather Impact Analysis
+Weather KPIs (avg temperature, feels-like, humidity, wind), daily service volume vs temperature trend, weather sensitivity comparison showing overcrowding delta between snow days (4h+) and non-snow days by route, dynamic narrative text with actionable recommendations, and a Weather × Weekday matrix.
+
+### Route Analysis
+Service Frequency vs Coverage scatter plot with 3-color categorization (High/Medium/Low frequency based on trips-per-stop ratio), route network treemap showing planned capacity by corridor with individual route breakdowns, and a corridor detail table with trip counts, stops, and direction balance.
+
+### Service Time Patterns
+Positions by time band, average service volume by day of week, hourly volume curve (0-23h), and a Day × Hour heatmap revealing that Thursday/Friday PM peaks carry the heaviest network load.
+
+### Fleet Optimization
+Top priority overcrowded routes with conditional color coding (Add Buses vs Monitor), fleet recommendation breakdown across 5 categories (Optimal/Monitor/Schedule Review/Reduce/Add), optimization summary narrative, and an Overcrowding Heatmap (Route × Hour) with conditional formatting showing exactly when and where overcrowding peaks.
 
 **Dynamic DAX measures** — All recommendations and KPIs are computed live from additive counts, not stored as text columns. Example:
 ```dax
@@ -261,6 +286,7 @@ stm-dbt/
 | **Additive measures in Gold** | Pre-calculated percentages break when aggregated across routes or corridors. Raw counts ensure `SUM(overcrowded) / SUM(total)` is correct at any level |
 | **Star schema with FK-only facts** | Route names live in `dim_routes` only — no duplication across 5 fact tables |
 | **Dynamic DAX recommendations** | Fleet recommendations computed live from counts, enabling correct recalculation when filtering by corridor, weather, or time period |
+| **snow_hours instead of dominant_weather** | A day with 3h of snow categorized as "Cloudy" by dominant weather hides the snow impact. `snow_hours` counts actual hours of snowfall, letting the BI layer define the threshold (4h+) |
 | **OBT for AI/ML readiness** | `obt_positions_wide` provides a fully denormalized semantic layer for pandas, Spark ML, or LLM analytics without complex joins |
 | **Protobuf parsing in PySpark** | GTFS-RT binary decoding at ingestion, not deferred downstream |
 | **UTC → Montreal timezone** | Converted at staging layer — all downstream models work in local time |
@@ -276,8 +302,9 @@ stm-dbt/
 This project was built applying principles from:
 
 - **Fundamentals of Data Engineering** (Joe Reis & Matt Housley) — Medallion architecture, idempotency, data quality as code, the 6 Undercurrents framework
+- **The Data Warehouse Toolkit** (Ralph Kimball & Margy Ross) — Star schema design, dimensional modeling, additive vs non-additive measures, conformed dimensions
 - **Designing Data-Intensive Applications** (Martin Kleppmann) — Schema-on-write, incremental processing, fault tolerance patterns
-- **Storytelling with Data** (Cole Nussbaumer Knaflic) — Dashboard design: clear visual hierarchy, actionable insights over raw numbers, narrative text explaining the "so what"
+- **Storytelling with Data** (Cole Nussbaumer Knaflic) — Dashboard design: clear visual hierarchy, actionable insights over raw numbers, conditional formatting to guide interpretation
 
 ---
 
@@ -302,6 +329,6 @@ dbt build   # run 22 models + 104 tests
 
 ## Author
 
-**Tariq** — Data Engineer building lakehouse architectures on Databricks and Microsoft Fabric.
+**Tariq** — Aspiring Data Engineer based in Montreal. This project was built to explore real-time transit data and apply modern data engineering practices end-to-end.
 
 [LinkedIn](https://www.linkedin.com/in/tariq-ladidji-b08951311/) · [GitHub](https://github.com/DataWithTariq)
